@@ -241,7 +241,9 @@ module Bundler
 
     # @return [String, nil] installed path
     def installed?(plugin)
-      index.installed?(plugin)
+      (path = index.installed?(plugin)) &&
+        index.plugin_path(plugin).join(PLUGIN_FILE_NAME).file? &&
+        path
     end
 
     # @return [true, false] whether the plugin is loaded
