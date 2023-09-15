@@ -27,6 +27,7 @@ module Bundler
       @commands = {}
       @hooks_by_event = Hash.new {|h, k| h[k] = [] }
       @loaded_plugin_names = []
+      @index = nil
     end
 
     reset!
@@ -238,11 +239,9 @@ module Bundler
       @hooks_by_event[event].each {|blk| blk.call(*args, &arg_blk) }
     end
 
-    # currently only intended for specs
-    #
     # @return [String, nil] installed path
     def installed?(plugin)
-      Index.new.installed?(plugin)
+      index.installed?(plugin)
     end
 
     # @return [true, false] whether the plugin is loaded
