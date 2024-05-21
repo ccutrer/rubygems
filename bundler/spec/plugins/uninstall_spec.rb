@@ -50,6 +50,7 @@ RSpec.describe "bundler plugin uninstall" do
 
     bundle "plugin uninstall path_plugin"
     expect(out).to include("Uninstalled plugin path_plugin")
+    Bundler::Plugin.reset!
     plugin_should_not_be_installed("path_plugin")
     # the actual gem still exists though
     expect(path).to be_a_directory

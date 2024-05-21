@@ -8,6 +8,7 @@ module Bundler
         [Bundler.local_platform]
       end
 
+      def locked_checksums; end
       def locked_ruby_version; end
 
       def bundler_version_to_lock

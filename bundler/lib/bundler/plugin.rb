@@ -103,6 +103,7 @@ module Bundler
     # @param [Pathname] gemfile path
     # @param [Proc] block that can be evaluated for (inline) Gemfile
     def gemfile_install(gemfile = nil, unlock: false, &inline)
+      was_deployment = Bundler.settings[:deployment]
       Bundler.settings.temporary(frozen: false, deployment: false) do
         builder = DSL.new
         if block_given?
@@ -113,11 +114,17 @@ module Bundler
 
         return if builder.dependencies.empty?
 
+        Bundler.configure_gem_home_and_path
+
         lockfile_contents = index.generate_lockfile(builder.instance_variable_get(:@sources), builder.dependencies)
         definition = builder.to_definition(nil, unlock || {}, lockfile_contents: lockfile_contents)
         unless definition.no_resolve_needed?
           Installer.new.install_definition(definition)
         end
+        # we may have cached the non-deployment gem path, so paths need to be
+        # reset in preparation for the regular gem installation phase that
+        # needs to use the deployment gem path
+        Bundler.reset_paths! if was_deployment
 
         plugins = definition.requested_dependencies.select(&:should_include?).map(&:name)
         installed_specs = plugins.to_h {|p| [p, definition.specs[p].first] }

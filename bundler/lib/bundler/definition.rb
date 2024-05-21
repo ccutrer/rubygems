@@ -296,9 +296,15 @@ module Bundler
 
     def plugins_for(groups)
       groups.map!(&:to_sym)
-      current_plugins.reject do |d|
-        (d.groups & groups).empty?
+      plugins = current_plugins # always returns a new array
+      plugins.select! do |d|
+        if RUBY_VERSION >= "3.1"
+          d.groups.intersect?(groups)
+        else
+          !(d.groups & groups).empty?
+        end
       end
+      plugins
     end
 
     # Resolve all the dependencies specified in Gemfile. It ensures that

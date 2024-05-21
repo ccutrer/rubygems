@@ -277,20 +277,33 @@ module Bundler
       version = args || [">= 0"]
 
       # We don't care to add sources for plugins in this pass over the gemfile
-      # since we're not actually installing plugins here (they should already
-      # be installed), just keeping track of them so that we can verify they
-      # are actually installed. This is important because otherwise sources
+      # since we're not installing plugins here (they should already be
+      # installed), only keeping track of them so that we can verify they
+      # are currently installed. This is important because otherwise sources
       # unique to the plugin (like a git source) would end up in the lockfile,
       # which we don't want.
       normalize_options(name, version, false, options)
 
       dep = Dependency.new(name, version, options)
 
-      # if there's already a dependency with this name we try to prefer one
+      # if there's already a plugin with this name we try to prefer one
       if current = @plugins.find {|d| d.name == dep.name }
-        Bundler.ui.warn "Your Gemfile lists the plugin #{current.name} (#{current.requirement}) more than once.\n" \
-                        "You should keep only one of them.\n" \
-                        "Remove any duplicate entries and specify the plugin only once."
+        if current.requirement != dep.requirement
+          raise GemfileError, "You cannot specify the same plugin twice with different version requirements.\n" \
+                           "You specified: #{current.name} (#{current.requirement}) and #{dep.name} (#{dep.requirement})" \
+                           "#{update_prompt}"
+        end
+
+        if current.source != dep.source
+          raise GemfileError, "You cannot specify the same plugin twice coming from different sources.\n" \
+                          "You specified that #{dep.name} (#{dep.requirement}) should come from " \
+                          "#{current.source || "an unspecified source"} and #{dep.source}\n"
+        else
+          Bundler.ui.warn "Your Gemfile lists the plugin #{current.name} (#{current.requirement}) more than once.\n" \
+                          "You should keep only one of them.\n" \
+                          "Remove any duplicate entries and specify the plugin only once." \
+                          "While it's not a problem now, it could cause errors if you change the version of one of them later."
+        end
       end
 
       @plugins << dep

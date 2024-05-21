@@ -123,7 +123,7 @@ RSpec.describe Bundler::Plugin do
     end
 
     it "doesn't calls installer without any plugins" do
-      allow(definition).to receive(:dependencies) { [] }
+      allow(builder).to receive(:dependencies) { [] }
       allow(installer).to receive(:install_definition).never
 
       subject.gemfile_install(gemfile)
@@ -139,8 +139,13 @@ RSpec.describe Bundler::Plugin do
 
       before do
         allow(index).to receive(:installed?) { nil }
-        allow(definition).to receive(:dependencies) { [Bundler::Dependency.new("new-plugin", ">=0"), Bundler::Dependency.new("another-plugin", ">=0")] }
+        allow(index).to receive(:generate_lockfile) { nil }
+        allow(builder).to receive(:dependencies) { [Bundler::Dependency.new("new-plugin", ">=0"), Bundler::Dependency.new("another-plugin", ">=0")] }
+        allow(definition).to receive(:no_resolve_needed?) { false }
+        allow(definition).to receive(:requested_dependencies) { builder.dependencies }
+        allow(definition).to receive(:specs) { plugin_specs.to_h {|p, s| [p, [s]] } }
         allow(installer).to receive(:install_definition) { plugin_specs }
+        allow(Bundler).to receive(:configure_gem_home_and_path) {}
       end
 
       it "should validate and register the plugins" do
