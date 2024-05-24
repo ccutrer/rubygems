@@ -120,6 +120,9 @@ module Bundler
         paths = {}
 
         specs.each do |spec|
+          # bundler is always an implicit gem, but we don't need to try and install it
+          next if spec.name == "bundler"
+
           spec.source.install spec
 
           paths[spec.name] = spec

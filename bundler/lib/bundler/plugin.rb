@@ -120,22 +120,28 @@ module Bundler
         definition = builder.to_definition(nil, unlock || {}, lockfile_contents: lockfile_contents)
         unless definition.no_resolve_needed?
           Installer.new.install_definition(definition)
+
+          plugins = definition.requested_dependencies.select(&:should_include?).map(&:name)
+          installed_specs = plugins.to_h {|p| [p, definition.specs[p].first] }
+
+          save_plugins plugins, installed_specs, builder.inferred_plugins
         end
         # we may have cached the non-deployment gem path, so paths need to be
         # reset in preparation for the regular gem installation phase that
         # needs to use the deployment gem path
         Bundler.reset_paths! if was_deployment
-
-        plugins = definition.requested_dependencies.select(&:should_include?).map(&:name)
-        installed_specs = plugins.to_h {|p| [p, definition.specs[p].first] }
-
-        save_plugins plugins, installed_specs, builder.inferred_plugins
       end
     rescue RuntimeError => e
       unless e.is_a?(GemfileError)
         Bundler.ui.error "Failed to install plugin: #{e.message}\n  #{e.backtrace[0]}"
       end
       raise
+    end
+
+    # returns an array of specs of installed plugins from a runtime Definition
+    # @param [Definition] definition
+    def installed_specs(definition)
+      index.specs(definition.send(:plugin_sources), definition.plugin_dependencies, :specification).grep(Gem::Specification)
     end
 
     # The index object used to store the details about the plugin
@@ -194,16 +200,16 @@ module Bundler
       @sources[source] = cls
     end
 
-    # Checks if any plugin declares the source
-    def source?(name)
-      !index.source_plugin(name.to_s).nil?
+    # Returns the plugin that handles sources of this name
+    def source_plugin(name)
+      index.source_plugin(name)
     end
 
     # @return [Class] that handles the source. The class includes API::Source
     def source(name)
-      raise UnknownSourceError, "Source #{name} not found" unless source? name
+      raise UnknownSourceError, "Source #{name} not found" unless (source_plugin = source_plugin(name))
 
-      load_plugin(index.source_plugin(name)) unless @sources.key? name
+      load_plugin(source_plugin) unless @sources.key? name
 
       @sources[name]
     end
@@ -329,7 +335,7 @@ module Bundler
         raise MalformattedPlugin, "#{e.class}: #{e.message}"
       end
 
-      if optional_plugin && @sources.keys.any? {|s| source? s }
+      if optional_plugin && @sources.keys.any? {|s| index.source_plugin(s) }
         Bundler.rm_rf(path)
         false
       else

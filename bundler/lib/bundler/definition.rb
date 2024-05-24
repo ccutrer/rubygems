@@ -14,7 +14,7 @@ module Bundler
     attr_reader(
       :dependencies,
       :locked_deps,
-      :plugins,
+      :plugin_dependencies,
       :locked_gems,
       :platforms,
       :ruby_version,
@@ -58,7 +58,8 @@ module Bundler
     # @param ruby_version [Bundler::RubyVersion, nil] Requested Ruby Version
     # @param optional_groups [Array(String)] A list of optional groups
     # @param lockfile_contents [String, nil] The contents of the lockfile
-    # @param plugins [Array(Bundler::Dependency)] array of plugin dependencies from Gemfile
+    # @param plugin_dependencies [Array(Bundler::Dependency)] array of plugin dependencies from Gemfile
+    # @param plugin_sources [Bundler::SourceList]
     def initialize(lockfile,
       dependencies,
       sources,
@@ -67,7 +68,8 @@ module Bundler
       optional_groups = [],
       gemfiles = [],
       lockfile_contents = nil,
-      plugins = [])
+      plugin_dependencies = [],
+      plugin_sources = SourceList.new)
       if [true, false].include?(unlock)
         @unlocking_bundler = false
         @unlocking = unlock
@@ -76,15 +78,16 @@ module Bundler
         @unlocking = unlock.any? {|_k, v| !Array(v).empty? }
       end
 
-      @dependencies    = dependencies
-      @plugins         = plugins
-      @sources         = sources
-      @unlock          = unlock
-      @optional_groups = optional_groups
-      @prefer_local    = false
-      @specs           = nil
-      @ruby_version    = ruby_version
-      @gemfiles        = gemfiles
+      @dependencies        = dependencies
+      @sources             = sources
+      @plugin_dependencies = plugin_dependencies
+      @plugin_sources      = plugin_sources
+      @unlock              = unlock
+      @optional_groups     = optional_groups
+      @prefer_local        = false
+      @specs               = nil
+      @ruby_version        = ruby_version
+      @gemfiles            = gemfiles
 
       @lockfile               = lockfile
 
@@ -240,16 +243,16 @@ module Bundler
       dependencies_for(requested_groups)
     end
 
-    def requested_plugins
-      plugins_for(requested_groups)
+    def requested_plugin_dependencies
+      plugin_dependencies_for(requested_groups)
     end
 
     def current_dependencies
       filter_relevant(dependencies)
     end
 
-    def current_plugins
-      filter_relevant(plugins)
+    def current_plugin_dependencies
+      filter_relevant(plugin_dependencies)
     end
 
     def current_locked_dependencies
@@ -294,9 +297,9 @@ module Bundler
       deps
     end
 
-    def plugins_for(groups)
+    def plugin_dependencies_for(groups)
       groups.map!(&:to_sym)
-      plugins = current_plugins # always returns a new array
+      plugins = current_plugin_dependencies # always returns a new array
       plugins.select! do |d|
         if RUBY_VERSION >= "3.1"
           d.groups.intersect?(groups)
@@ -340,11 +343,14 @@ module Bundler
     end
 
     def spec_git_paths
-      sources.git_sources.map {|s| File.realpath(s.path) if File.exist?(s.path) }.compact
+      # plugin sources from the main Gemfile run we never instructed that they are cached,
+      # but they were, by the plugin run of the gemfile
+      plugin_sources.git_sources.each(&:cached!)
+      (sources.git_sources + plugin_sources.git_sources).uniq.filter_map {|s| File.realpath(s.path) if File.exist?(s.path) }
     end
 
     def groups
-      (dependencies + plugins).map(&:groups).flatten.uniq
+      (dependencies + plugin_dependencies).map(&:groups).flatten.uniq
     end
 
     def lock(file_or_preserve_unknown_sections = false, preserve_unknown_sections_or_unused = false)
@@ -488,7 +494,7 @@ module Bundler
 
     def validate_plugins!
       missing_plugins_list = []
-      requested_plugins.each do |plugin|
+      requested_plugin_dependencies.each do |plugin|
         missing_plugins_list << plugin unless Plugin.installed?(plugin.name)
       end
       if missing_plugins_list.size > 1
@@ -516,8 +522,8 @@ module Bundler
       end
     end
 
-    attr_reader :sources
-    private :sources
+    attr_reader :sources, :plugin_sources
+    private :sources, :plugin_sources
 
     def nothing_changed?
       return false unless lockfile_exists?

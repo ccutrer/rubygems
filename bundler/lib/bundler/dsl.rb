@@ -27,9 +27,12 @@ module Bundler
     def initialize
       @source               = nil
       @sources              = SourceList.new
+      @plugin_sources       = SourceList.new
+      @current_sources      = @sources
       @git_sources          = {}
       @dependencies         = []
-      @plugins              = []
+      @plugin_dependencies  = []
+      @current_dependencies = @dependencies
       @groups               = []
       @install_conditionals = []
       @optional_groups      = []
@@ -98,12 +101,12 @@ module Bundler
       options["gemfile"] = @gemfile
       version = args || [">= 0"]
 
-      normalize_options(name, version, true, options)
+      normalize_options(name, version, options)
 
       dep = Dependency.new(name, version, options)
 
       # if there's already a dependency with this name we try to prefer one
-      if current = @dependencies.find {|d| d.name == dep.name }
+      if current = @current_dependencies.find {|d| d.name == dep.name }
         if current.requirement != dep.requirement
           current_requirement_open = current.requirements_list.include?(">= 0")
 
@@ -136,7 +139,7 @@ module Bundler
 
         # Always prefer the dependency from the Gemfile
         if current.gemspec_dev_dep?
-          @dependencies.delete(current)
+          @current_dependencies.delete(current)
         elsif dep.gemspec_dev_dep?
           return
         elsif current.source != dep.source
@@ -151,7 +154,7 @@ module Bundler
         end
       end
 
-      @dependencies << dep
+      @current_dependencies << dep
     end
 
     def source(source, *args, &blk)
@@ -161,7 +164,7 @@ module Bundler
 
       if options.key?("type")
         options["type"] = options["type"].to_s
-        unless Plugin.source?(options["type"])
+        unless (source_plugin = Plugin.source_plugin(options["type"]))
           raise InvalidOption, "No plugin sources available for #{options["type"]}"
         end
 
@@ -169,12 +172,14 @@ module Bundler
           raise InvalidOption, "You need to pass a block to #source with :type option"
         end
 
+        plugin(source_plugin) unless @plugin_dependencies.any? {|d| d.name == source_plugin }
+
         source_opts = options.merge("uri" => source)
-        with_source(@sources.add_plugin_source(options["type"], source_opts), &blk)
+        with_source(add_source(:add_plugin_source, options["type"], source_opts), &blk)
       elsif block_given?
-        with_source(@sources.add_rubygems_source("remotes" => source), &blk)
+        with_source(add_source(:add_rubygems_source, "remotes" => source), &blk)
       else
-        @sources.add_global_rubygems_remote(source)
+        add_source(:add_global_rubygems_remote, source)
       end
     end
 
@@ -200,8 +205,7 @@ module Bundler
 
       source_options["global"] = true unless block_given?
 
-      source = @sources.add_path_source(source_options)
-      with_source(source, &blk)
+      with_source(add_source(:add_path_source, source_options), &blk)
     end
 
     def git(uri, options = {}, &blk)
@@ -216,20 +220,29 @@ module Bundler
         raise DeprecatedError, msg
       end
 
-      with_source(@sources.add_git_source(normalize_hash(options).merge("uri" => uri)), &blk)
+      options = normalize_hash(options).merge("uri" => uri)
+      with_source(add_source(:add_git_source, options), &blk)
     end
 
-    def github(repo, options = {})
+    def github(repo, options = {}, &blk)
       raise ArgumentError, "GitHub sources require a block" unless block_given?
-      github_uri  = @git_sources["github"].call(repo)
-      git_options = normalize_hash(options).merge("uri" => github_uri)
-      git_source  = @sources.add_git_source(git_options)
-      with_source(git_source) { yield }
+      github_uri = @git_sources["github"].call(repo)
+      options = normalize_hash(options).merge("uri" => github_uri)
+      with_source(add_source(:add_git_source, options), &blk)
     end
 
     def to_definition(lockfile, unlock, lockfile_contents: nil)
       check_primary_source_safety
-      Definition.new(lockfile, @dependencies, @sources, unlock, @ruby_version, @optional_groups, @gemfiles, lockfile_contents, @plugins)
+      Definition.new(lockfile,
+                     @dependencies,
+                     @sources,
+                     unlock,
+                     @ruby_version,
+                     @optional_groups,
+                     @gemfiles,
+                     lockfile_contents,
+                     @plugin_dependencies,
+                     @plugin_sources)
     end
 
     def group(*args, &blk)
@@ -272,41 +285,12 @@ module Bundler
     end
 
     def plugin(name, *args)
-      options = args.last.is_a?(Hash) ? args.pop.dup : {}
-      options["gemfile"] = @gemfile
-      version = args || [">= 0"]
-
-      # We don't care to add sources for plugins in this pass over the gemfile
-      # since we're not installing plugins here (they should already be
-      # installed), only keeping track of them so that we can verify they
-      # are currently installed. This is important because otherwise sources
-      # unique to the plugin (like a git source) would end up in the lockfile,
-      # which we don't want.
-      normalize_options(name, version, false, options)
-
-      dep = Dependency.new(name, version, options)
-
-      # if there's already a plugin with this name we try to prefer one
-      if current = @plugins.find {|d| d.name == dep.name }
-        if current.requirement != dep.requirement
-          raise GemfileError, "You cannot specify the same plugin twice with different version requirements.\n" \
-                           "You specified: #{current.name} (#{current.requirement}) and #{dep.name} (#{dep.requirement})" \
-                           "#{update_prompt}"
-        end
-
-        if current.source != dep.source
-          raise GemfileError, "You cannot specify the same plugin twice coming from different sources.\n" \
-                          "You specified that #{dep.name} (#{dep.requirement}) should come from " \
-                          "#{current.source || "an unspecified source"} and #{dep.source}\n"
-        else
-          Bundler.ui.warn "Your Gemfile lists the plugin #{current.name} (#{current.requirement}) more than once.\n" \
-                          "You should keep only one of them.\n" \
-                          "Remove any duplicate entries and specify the plugin only once." \
-                          "While it's not a problem now, it could cause errors if you change the version of one of them later."
-        end
-      end
-
-      @plugins << dep
+      @current_sources = @plugin_sources
+      @current_dependencies = @plugin_dependencies
+      gem(name, *args)
+    ensure
+      @current_sources = @sources
+      @current_dependencies = @dependencies
     end
 
     def method_missing(name, *args)
@@ -319,6 +303,11 @@ module Bundler
     end
 
     private
+
+    def add_source(method, *args)
+      @plugin_sources.send(method, *args) unless @plugin_sources.equal?(@current_sources)
+      @current_sources.send(method, *args)
+    end
 
     def add_git_sources
       git_source(:github) do |repo_name|
@@ -382,7 +371,7 @@ module Bundler
       @valid_keys ||= VALID_KEYS
     end
 
-    def normalize_options(name, version, add_to_sources, opts)
+    def normalize_options(name, version, opts)
       if name.is_a?(Symbol)
         raise GemfileError, %(You need to specify gem names as Strings. Use 'gem "#{name}"' instead)
       end
@@ -417,9 +406,9 @@ module Bundler
       end
 
       # Save sources passed in a key
-      if opts.key?("source") && add_to_sources
+      if opts.key?("source")
         source = normalize_source(opts["source"])
-        opts["source"] = @sources.add_rubygems_source("remotes" => source)
+        opts["source"] = @current_sources.add_rubygems_source("remotes" => source)
       end
 
       git_name = (git_names & opts.keys).last
@@ -438,10 +427,8 @@ module Bundler
         else
           options = opts.dup
         end
-        if add_to_sources
-          source = send(type, param, options) {}
-          opts["source"] = source
-        end
+        source = send(type, param, options) {}
+        opts["source"] = source
       end
 
       opts["source"]         ||= @source

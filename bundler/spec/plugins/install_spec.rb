@@ -319,7 +319,8 @@ RSpec.describe "bundler plugin install" do
         gem 'rack', "1.0.0"
       G
 
-      bundle "install --without development"
+      bundle "config set --local without development"
+      bundle "install"
 
       expect(out).not_to include("Installed plugin foo")
 
@@ -411,7 +412,7 @@ RSpec.describe "bundler plugin install" do
       2.times { bundle "install" }
 
       expect(out).to_not include("Fetching gem metadata")
-      expect(out).to_not include("Installing foo")
+      expect(out).to_not include("Fetching foo")
       expect(out).to_not include("Installed plugin foo")
 
       expect(out).to include("Bundle complete!")
@@ -431,7 +432,7 @@ RSpec.describe "bundler plugin install" do
       expect(out).to include("Installing kung-foo")
       expect(out).to include("Installed plugin kung-foo")
 
-      expect(out).to_not include("Installing foo")
+      expect(out).to_not include("Fetching foo")
       expect(out).to_not include("Installed plugin foo")
 
       expect(out).to include("Bundle complete!")

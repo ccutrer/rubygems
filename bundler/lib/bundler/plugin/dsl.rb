@@ -5,7 +5,7 @@ module Bundler
     # Dsl to parse the Gemfile looking for plugins to install
     class DSL < Bundler::Dsl
       class PluginGemfileError < PluginError; end
-      alias_method :_gem, :gem # To use for plugin installation as gem
+      alias_method :plugin, :gem # To use for plugin installation as gem
 
       # So that we don't have to override all there methods to dummy ones
       # explicitly.
@@ -24,12 +24,7 @@ module Bundler
 
       def initialize
         super
-        @sources = Plugin::SourceList.new
         @inferred_plugins = [] # The source plugins inferred from :type
-      end
-
-      def plugin(name, *args)
-        _gem(name, *args)
       end
 
       def method_missing(name, *args)

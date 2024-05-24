@@ -123,10 +123,6 @@ module Bundler
         @commands.find_all {|_, n| n == plugin }.map(&:first)
       end
 
-      def source?(source)
-        @sources.key? source
-      end
-
       def source_plugin(name)
         @sources[name]
       end
@@ -146,16 +142,24 @@ module Bundler
 
       # generate an in-memory lockfile from the index
       def generate_lockfile(sources, dependencies)
-        specs = []
+        specs = specs(sources, dependencies, :lazy)
+
+        require_relative "../lockfile_generator"
+        LockfileGenerator.generate(IndexDefinition.new(sources, specs, dependencies))
+      end
+
+      def specs(sources, dependencies, type)
         sources.cached!
         default_source = sources.global_rubygems_source
 
-        installed_plugins.each do |plugin|
+        installed_plugins.filter_map do |plugin|
           path = plugin_path(plugin)
           # path gems may have a gemspec, which is the most trustworthy
           # way to determine the version
           version = if (gemspec = path.join("#{plugin}.gemspec")).file?
-            Gem::Specification.load(gemspec.to_s).version
+            spec = Gem::Specification.load(gemspec.to_s)
+            spec.full_gem_path = path.to_s
+            spec.version
           elsif (version_index = path.to_s.index("#{plugin}-"))
             path.to_s[(version_index + plugin.length + 1)..]
           end
@@ -165,14 +169,16 @@ module Bundler
           dep = dependencies.find {|d| d.name == plugin }
           next unless dep
 
-          spec = LazySpecification.new(plugin, version, nil, dep.source || default_source)
-          next unless spec.satisfies?(dep)
+          lazy_spec = LazySpecification.new(plugin, version, nil, dep.source || default_source)
+          next unless lazy_spec.satisfies?(dep)
 
-          specs << spec
+          if type == :lazy
+            lazy_spec
+          else
+            spec.source = dep.source || default_source
+            spec
+          end
         end
-
-        require_relative "../lockfile_generator"
-        LockfileGenerator.generate(IndexDefinition.new(sources, specs, dependencies))
       end
 
       private
